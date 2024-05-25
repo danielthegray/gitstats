@@ -50,6 +50,18 @@ conf = {
 	'start_date': ''
 }
 
+def getauthormappings():
+	home_folder = os.environ['HOME']
+	author_mappings_filename = home_folder + "/.gitstats_author_mappings"
+	if not os.path.isfile(author_mappings_filename):
+		return {}
+	mappings = {}
+	with open(author_mappings_filename) as author_mappings_file:
+		for author_mapping in author_mappings_file:
+			mapping = author_mapping.split('=', 1)
+			mappings[mapping[0].strip()] = mapping[1].strip()
+	return mappings
+
 def getpipeoutput(cmds, quiet = False):
 	global exectime_external
 	start = time.time()
@@ -304,7 +316,14 @@ class GitDataCollector(DataCollector):
 	def collect(self, dir):
 		DataCollector.collect(self, dir)
 
-		self.total_authors += int(getpipeoutput(['git shortlog -s %s' % getlogrange(), 'wc -l']))
+		author_mappings = getauthormappings()
+
+		authors_list = set(map(
+				lambda author: author_mappings.get(author, author),
+				map(
+					lambda author_line: re.sub(r'^\s*[0-9]+\s*', '', author_line),
+					getpipeoutput(['git shortlog -s %s' % getlogrange()]).split('\n'))))
+		self.total_authors += len(authors_list)
 		#self.total_lines = int(getoutput('git-ls-files -z |xargs -0 cat |wc -l'))
 
 		# tags
@@ -339,7 +358,7 @@ class GitDataCollector(DataCollector):
 			for line in output.split('\n'):
 				parts = re.split(r'\s+', line, 2)
 				commits = int(parts[1])
-				author = parts[2]
+				author = author_mappings.get(parts[2], parts[2])
 				self.tags[tag]['commits'] += commits
 				self.tags[tag]['authors'][author] = commits
 
@@ -356,6 +375,7 @@ class GitDataCollector(DataCollector):
 			timezone = parts[3]
 			author, mail = parts[4].split('<', 1)
 			author = author.rstrip()
+			author = author_mappings.get(author, author)
 			mail = mail.rstrip('>')
 			domain = '?'
 			if mail.find('@') != -1:
@@ -558,6 +578,7 @@ class GitDataCollector(DataCollector):
 		lines.reverse()
 		files = 0; inserted = 0; deleted = 0; total_lines = 0
 		author = None
+		author_mappings = getauthormappings()
 		for line in lines:
 			if len(line) == 0:
 				continue
@@ -568,6 +589,7 @@ class GitDataCollector(DataCollector):
 				if pos != -1:
 					try:
 						(stamp, author) = (int(line[:pos]), line[pos+1:])
+						author = author_mappings.get(author, author)
 						self.changes_by_date[stamp] = { 'files': files, 'ins': inserted, 'del': deleted, 'lines': total_lines }
 
 						date = datetime.datetime.fromtimestamp(stamp)
@@ -649,6 +671,7 @@ class GitDataCollector(DataCollector):
 		lines.reverse()
 		files = 0; inserted = 0; deleted = 0
 		author = None
+		author_mappings = getauthormappings()
 		stamp = 0
 		for line in lines:
 			if len(line) == 0:
@@ -661,6 +684,7 @@ class GitDataCollector(DataCollector):
 					try:
 						oldstamp = stamp
 						(stamp, author) = (int(line[:pos]), line[pos+1:])
+						author = author_mappings.get(author, author)
 						if oldstamp > stamp:
 							# clock skew, keep old timestamp to avoid having ugly graph
 							stamp = oldstamp
